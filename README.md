@@ -1,3 +1,6 @@
+## Aperçu de l'interface
+![Aperçu de l'application](assets/ui-demo.png)
+
 # SystemEventMonitor
 
 Un outil d'automatisation de sons et d'alertes visuelles, conçu pour la gestion d'événements périodiques sur Windows.
