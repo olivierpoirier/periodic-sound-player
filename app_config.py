@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 
 APP_TITLE = "SoundMaker Prank Console"
-STEALTH_TITLE = "Host Process for Windows Tasks"
 APP_VERSION = "1.0.0"
 UPDATE_REPOSITORY = "olivierpoirier/periodic-sound-player"
 KO_FI_URL = "https://ko-fi.com/olivierpoirier37560"
@@ -81,9 +80,9 @@ MODES = [
     ModeInfo(
         MODE_FAKE_ERROR,
         "Fake error",
-        "Shows a more realistic Windows-style error dialog.",
+        "Shows a realistic system-style error dialog.",
         "Fausse erreur",
-        "Affiche une fausse erreur plus réaliste, style Windows.",
+        "Affiche une fausse erreur realiste, style systeme.",
         "#ff5c5c",
     ),
     ModeInfo(
@@ -96,10 +95,10 @@ MODES = [
     ),
     ModeInfo(
         MODE_WINDOWS_ERROR,
-        "Windows error sound",
-        "Only plays the native Windows error sound.",
-        "Son erreur Windows",
-        "Déclenche uniquement le bip d'erreur Windows.",
+        "System error sound",
+        "Plays the native error sound when available, otherwise a portable beep.",
+        "Son erreur systeme",
+        "Declenche le son d'erreur du systeme, avec bip portable au besoin.",
         "#d7dde8",
     ),
     ModeInfo(
@@ -224,7 +223,7 @@ TRANSLATIONS = {
         "test_now": "Test this mode now",
         "recalculate": "Recalculate timer",
         "menu_pause": "Pause / resume",
-        "menu_stealth": "Windows camouflage",
+        "menu_stealth": "System camouflage",
         "open_images": "Open Images folder",
         "open_sounds": "Open Sounds folder",
         "open_memes": "Open meme text file",
@@ -325,7 +324,7 @@ TRANSLATIONS = {
         "test_now": "Tester ce mode maintenant",
         "recalculate": "Recalculer le minuteur",
         "menu_pause": "Pause / reprendre",
-        "menu_stealth": "Camouflage Windows",
+        "menu_stealth": "Camouflage systeme",
         "open_images": "Ouvrir le dossier Images",
         "open_sounds": "Ouvrir le dossier Sounds",
         "open_memes": "Ouvrir le fichier des memes",

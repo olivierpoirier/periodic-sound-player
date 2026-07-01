@@ -69,8 +69,8 @@ def load_preferences(app: Any) -> None:
         app.library.set_sound_category(sound_category)
 
 
-def save_preferences(app: Any) -> None:
-    data = {
+def snapshot_preferences(app: Any) -> dict[str, Any]:
+    return {
         "language": app.language,
         "active_mode": app.active_mode,
         "selected_theme": app.selected_theme,
@@ -97,7 +97,14 @@ def save_preferences(app: Any) -> None:
         "image_category": app.library.selected_image_category,
         "sound_category": app.library.selected_sound_category,
     }
-    app.preferences_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def write_preferences(path: Any, data: dict[str, Any]) -> None:
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def save_preferences(app: Any) -> None:
+    write_preferences(app.preferences_path, snapshot_preferences(app))
 
 
 def _bounded_int(value: object, fallback: int, low: int, high: int) -> int:

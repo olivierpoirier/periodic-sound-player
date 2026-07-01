@@ -21,7 +21,44 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qt_widgets import GardenComboBox, GardenToggle, PaintedButton, SafeSlider, SmoothRadioButton
+from qt_widgets import GardenComboBox, GardenToggle, PaintedButton, SafeSlider, SmoothLabel, SmoothRadioButton
+
+
+class ToggleHitArea(QWidget):
+    def __init__(self, toggle: GardenToggle) -> None:
+        super().__init__()
+        self.toggle = toggle
+        self.setCursor(Qt.PointingHandCursor)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 5, 14, 5)
+        row.setSpacing(0)
+        row.addWidget(toggle)
+        self.setFixedSize(toggle.width() + 24, toggle.height() + 10)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt API name
+        if event.button() == Qt.LeftButton:
+            self.toggle.click()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class ToggleChoiceLabel(QLabel):
+    def __init__(self, text: str, checked: bool, toggle: GardenToggle) -> None:
+        super().__init__(text)
+        self.checked = checked
+        self.toggle = toggle
+        self.setObjectName("muted")
+        self.setWordWrap(False)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setContentsMargins(6, 4, 6, 4)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt API name
+        if event.button() == Qt.LeftButton:
+            self.toggle.setChecked(self.checked)
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 @dataclass(frozen=True)
@@ -122,12 +159,12 @@ def add_toggle_row(
     row = QHBoxLayout()
     row.addWidget(label(text, "muted"))
     row.addStretch(1)
-    row.addWidget(label(no_text, "muted"))
     toggle = GardenToggle()
     toggle.setChecked(checked)
     toggle.toggled.connect(callback)
-    row.addWidget(toggle)
-    row.addWidget(label(yes_text, "muted"))
+    row.addWidget(ToggleChoiceLabel(no_text, False, toggle))
+    row.addWidget(ToggleHitArea(toggle))
+    row.addWidget(ToggleChoiceLabel(yes_text, True, toggle))
     layout.addLayout(row)
     return toggle
 
@@ -187,7 +224,7 @@ def add_selected_file_controls(
     choose_button.setObjectName("secondaryButton")
     choose_button.clicked.connect(on_choose)
 
-    name_label = QLabel(selected_path.name if selected_path else empty_text)
+    name_label = SmoothLabel(selected_path.name if selected_path else empty_text)
     name_label.setObjectName("filePill")
     name_label.setMinimumWidth(0)
     name_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -230,7 +267,7 @@ def add_image_preview(
     on_click: Callable[[], None] | None,
     show_name: bool,
 ) -> tuple[QLabel, QLabel | None]:
-    image_label = QLabel(placeholder)
+    image_label = SmoothLabel(placeholder)
     image_label.setObjectName("imagePreview")
     image_label.setAlignment(Qt.AlignCenter)
     image_label.setScaledContents(False)
@@ -243,7 +280,7 @@ def add_image_preview(
 
     name_label = None
     if show_name:
-        name_label = QLabel(placeholder)
+        name_label = SmoothLabel(placeholder)
         name_label.setObjectName("filePill")
         name_label.setAlignment(Qt.AlignCenter)
         name_label.setMinimumWidth(0)

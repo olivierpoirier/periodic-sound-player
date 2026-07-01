@@ -9,6 +9,7 @@ import shutil
 import sys
 import webbrowser
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -84,12 +85,12 @@ from app_config import (
     MODE_SINGLE_SOUND,
     MODE_WINDOWS_ERROR,
     MODES,
-    STEALTH_TITLE,
     TRANSLATIONS,
 )
 from asset_library import AssetLibrary
 from audio_manager import AudioManager
 from image_loader import load_pixmap, load_qimage
+from platform_utils import IS_WINDOWS, open_path, platform_stealth_title
 from update_manager import UpdateResult
 from qt_backdrop import PrankBackdrop
 from qt_components import (
@@ -98,29 +99,58 @@ from qt_components import (
     add_tab,
     label as component_label,
 )
-from qt_dialogs import HelpDialog, MemeDialog
+from qt_dialogs import HelpDialog, MemeDialog, UpdateDialog
 from qt_file_actions import active_sound_folder, choose_meme_image, choose_sound_in_library, import_images, import_sound_files
 from qt_icons import coffee_sakura_icon, prank_app_icon
 import qt_mode_settings
-from qt_preferences import load_preferences, save_preferences
-from qt_theme import BUILTIN_THEME_NAMES, HOME_THEME_CAPTIONS, THEME_CREDITS, build_theme_qss
+from qt_preferences import load_preferences, save_preferences, snapshot_preferences, write_preferences
+from qt_theme import BUILTIN_THEME_NAMES, HOME_THEME_CAPTIONS, THEME_CREDITS, ThemePalette, build_theme_qss
 from qt_update_service import UpdateService
-from qt_widgets import PaintedButton, SmoothFrame, SmoothGroupBox, SmoothRadioButton, SmoothTabBar
+from qt_widgets import PaintedButton, SmoothFrame, SmoothGroupBox, SmoothLabel, SmoothRadioButton, SmoothTabBar
 
 
 class ThemeLoadSignals(QObject):
-    loaded = Signal(str, QImage)
+    loaded = Signal(object)
+
+
+@dataclass(frozen=True)
+class ThemeLoadResult:
+    theme_name: str
+    cache_key: tuple[str, int, int]
+    image: QImage
+    palette: ThemePalette
 
 
 class ThemeLoadTask(QRunnable):
-    def __init__(self, theme_name: str, theme_path: Path) -> None:
+    def __init__(self, theme_name: str, theme_path: Path, target_size: QSize) -> None:
         super().__init__()
         self.theme_name = theme_name
         self.theme_path = theme_path
+        self.target_size = QSize(max(1, target_size.width()), max(1, target_size.height()))
+        self.cache_key = (theme_name, self.target_size.width(), self.target_size.height())
+        self.result: ThemeLoadResult | None = None
         self.signals = ThemeLoadSignals()
 
     def run(self) -> None:
-        self.signals.loaded.emit(self.theme_name, load_qimage(self.theme_path))
+        image = load_qimage(self.theme_path)
+        if not image.isNull():
+            image = image.scaled(self.target_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        palette = PrankBackdrop.palette_from_image(image)
+        self.result = ThemeLoadResult(self.theme_name, self.cache_key, image, palette)
+        self.signals.loaded.emit(self.result)
+
+
+class PreferenceSaveTask(QRunnable):
+    def __init__(self, path: Path, data: dict[str, object]) -> None:
+        super().__init__()
+        self.path = path
+        self.data = data
+
+    def run(self) -> None:
+        try:
+            write_preferences(self.path, self.data)
+        except OSError:
+            pass
 
 
 class SoundMakerQtApp(QMainWindow):
@@ -166,7 +196,6 @@ class SoundMakerQtApp(QMainWindow):
         self.volume = 0.7
         self.is_running = True
         self.next_event_time = datetime.now()
-        self._mode_switch_quiet_until = datetime.min
         self.paused_remaining_seconds: int | None = None
 
         self.selected_meme_template = {"top": "", "bottom": ""}
@@ -203,8 +232,17 @@ class SoundMakerQtApp(QMainWindow):
         self.theme_spinner_timer = QTimer(self)
         self.theme_spinner_timer.timeout.connect(self._advance_theme_spinner)
         self.theme_load_pool = QThreadPool(self)
+        self.theme_load_pool.setMaxThreadCount(2)
         self.pending_theme_name = ""
+        self.pending_theme_cache_key: tuple[str, int, int] | None = None
         self.theme_load_tasks: list[ThemeLoadTask] = []
+        self.theme_cache: dict[tuple[str, int, int], ThemeLoadResult] = {}
+        self.theme_cache_order: list[tuple[str, int, int]] = []
+        self.preference_save_pool = QThreadPool(self)
+        self.preference_save_pool.setMaxThreadCount(1)
+        self.preference_save_timer = QTimer(self)
+        self.preference_save_timer.setSingleShot(True)
+        self.preference_save_timer.timeout.connect(self._write_preferences_async)
 
         self._configure_window()
         self._build_ui()
@@ -221,12 +259,24 @@ class SoundMakerQtApp(QMainWindow):
         self.loop_timer = QTimer(self)
         self.loop_timer.timeout.connect(self._director_loop)
         self.loop_timer.start(1000)
+        QTimer.singleShot(650, self._preload_next_theme)
         QTimer.singleShot(3500, lambda: self.check_for_updates(manual=False))
 
     def _load_preferences(self) -> None:
         load_preferences(self)
 
     def _save_preferences(self) -> None:
+        self._queue_save_preferences()
+
+    def _queue_save_preferences(self) -> None:
+        self.preference_save_timer.start(250)
+
+    def _write_preferences_async(self) -> None:
+        self.preference_save_pool.start(PreferenceSaveTask(self.preferences_path, snapshot_preferences(self)))
+
+    def _save_preferences_now(self) -> None:
+        self.preference_save_timer.stop()
+        self.preference_save_pool.waitForDone(2000)
         save_preferences(self)
 
     def _t(self, key: str, **kwargs: object) -> str:
@@ -548,7 +598,7 @@ class SoundMakerQtApp(QMainWindow):
         timer_layout.addWidget(self.accent_bar)
         self.timer_label = QLabel(self._t("next_event", minutes=0, seconds=0))
         self.timer_label.setObjectName("timerText")
-        self.mode_status_label = QLabel(self._t("mode_prefix", mode=MODE_BY_KEY[self.active_mode].name(self.language)))
+        self.mode_status_label = SmoothLabel(self._t("mode_prefix", mode=MODE_BY_KEY[self.active_mode].name(self.language)))
         self.mode_status_label.setObjectName("modeChip")
         timer_layout.addWidget(self.timer_label)
         timer_layout.addWidget(self.mode_status_label)
@@ -794,10 +844,11 @@ class SoundMakerQtApp(QMainWindow):
             f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {accent}, stop:0.55 {self.theme_palette.hex(self.theme_palette.accent_alt)}, stop:1 {self.theme_palette.hex(self.theme_palette.text)});"
             "border-radius: 3px;"
         )
+        self.mode_status_label.setProperty("smoothBorderColor", QColor(accent))
         self.mode_status_label.setStyleSheet(
-            f"color: {self.theme_palette.hex(self.theme_palette.text)}; background: {self.theme_palette.rgba(self.theme_palette.base, 184)}; border: 2px solid {accent};"
-            "border-radius: 12px; padding: 5px 10px;"
+            f"color: {self.theme_palette.hex(self.theme_palette.text)}; background: transparent; border: 0; padding: 5px 10px;"
         )
+        self.mode_status_label.update()
         self.brand_mark.setPixmap(self._prank_app_icon().pixmap(46, 46))
         if getattr(self, "settings_title", None):
             self.settings_title.setStyleSheet(f"color: {accent};")
@@ -883,11 +934,9 @@ class SoundMakerQtApp(QMainWindow):
         animation.start()
 
     def on_mode_selected(self, mode_key: str) -> None:
-        self._mode_switch_quiet_until = datetime.now() + timedelta(seconds=2)
         self.active_mode = mode_key
         self.chaos_factor = 1.0
         self._render_mode_settings()
-        self.schedule_next_event(reset_chaos=True)
         self._save_preferences()
 
     def on_chat_notification_selected(self, choice: str) -> None:
@@ -962,7 +1011,7 @@ class SoundMakerQtApp(QMainWindow):
 
     def on_meme_sound_enabled_changed(self, enabled: bool) -> None:
         self.meme_sound_enabled = enabled
-        self._save_preferences()
+        self._queue_save_preferences()
 
     def on_meme_sound_mode_changed(self, mode: str) -> None:
         self.meme_sound_mode = mode
@@ -1038,36 +1087,117 @@ class SoundMakerQtApp(QMainWindow):
         if self.theme_loading:
             return
         next_theme = self.backdrop.next_theme_name()
-        next_theme_path = self.backdrop.theme_path(next_theme) if next_theme else None
-        if not next_theme_path:
+        self._begin_theme_change(next_theme)
+
+    def _begin_theme_change(self, theme_name: str) -> None:
+        if self.theme_loading:
             return
+        theme_name = self._resolve_theme_name(theme_name)
+        theme_path = self.backdrop.theme_path(theme_name) if theme_name else None
+        if not theme_path:
+            return
+        cache_key = self._theme_cache_key(theme_name)
+        self._start_theme_loading_ui(theme_name, cache_key)
+        cached = self.theme_cache.get(cache_key)
+        if cached:
+            QTimer.singleShot(0, lambda result=cached: self._finish_theme_cycle(result))
+            return
+        task = self._theme_task_for(cache_key)
+        if task:
+            self._finish_when_theme_task_ready(task)
+            return
+        task = ThemeLoadTask(theme_name, theme_path, self._theme_target_size())
+        task.signals.loaded.connect(self._finish_theme_cycle)
+        self.theme_load_tasks.append(task)
+        self.theme_load_pool.start(task)
+
+    def _start_theme_loading_ui(self, theme_name: str, cache_key: tuple[str, int, int]) -> None:
         self.theme_loading = True
-        self.pending_theme_name = next_theme
+        self.pending_theme_name = theme_name
+        self.pending_theme_cache_key = cache_key
         self.theme_spinner_angle = 0
         self.theme_button.setEnabled(False)
         self.theme_button.setText("")
         self._advance_theme_spinner()
         self.theme_spinner_timer.start(45)
-        task = ThemeLoadTask(next_theme, next_theme_path)
-        task.signals.loaded.connect(self._finish_theme_cycle)
-        self.theme_load_tasks.append(task)
-        self.theme_load_pool.start(task)
 
-    def _finish_theme_cycle(self, theme_name: str, image: QImage) -> None:
+    def _finish_when_theme_task_ready(self, task: ThemeLoadTask) -> None:
+        task.signals.loaded.connect(self._finish_theme_cycle)
+        if task.result is not None:
+            QTimer.singleShot(0, lambda result=task.result: self._finish_theme_cycle(result))
+
+    def _finish_theme_cycle(self, result: ThemeLoadResult) -> None:
+        is_pending_request = result.cache_key == self.pending_theme_cache_key
         try:
-            if theme_name == self.pending_theme_name and not image.isNull():
-                self.selected_theme = self.backdrop.apply_theme_image(theme_name, image)
+            self._store_theme_cache(result)
+            self._forget_theme_task(result.cache_key)
+            if is_pending_request and not result.image.isNull():
+                self.selected_theme = self.backdrop.apply_theme_image(result.theme_name, result.image, result.palette)
                 self._apply_theme_palette()
                 self._apply_window_identity()
                 self._save_preferences()
         finally:
-            self.theme_load_tasks = [task for task in self.theme_load_tasks if task.theme_name != theme_name]
-            self.theme_spinner_timer.stop()
-            self.theme_loading = False
-            self.pending_theme_name = ""
-            self.theme_button.setIcon(QIcon())
-            self.theme_button.setText(self._t("theme"))
-            self.theme_button.setEnabled(True)
+            if is_pending_request:
+                self.theme_spinner_timer.stop()
+                self.theme_loading = False
+                self.pending_theme_name = ""
+                self.pending_theme_cache_key = None
+                self.theme_button.setIcon(QIcon())
+                self.theme_button.setText(self._t("theme"))
+                self.theme_button.setEnabled(True)
+                QTimer.singleShot(120, self._preload_next_theme)
+
+    def _preload_next_theme(self) -> None:
+        if self.theme_loading or not hasattr(self, "backdrop"):
+            return
+        next_theme = self._resolve_theme_name(self.backdrop.next_theme_name())
+        theme_path = self.backdrop.theme_path(next_theme) if next_theme else None
+        if not theme_path:
+            return
+        cache_key = self._theme_cache_key(next_theme)
+        if cache_key in self.theme_cache or self._theme_task_for(cache_key):
+            return
+        task = ThemeLoadTask(next_theme, theme_path, self._theme_target_size())
+        task.signals.loaded.connect(self._store_preloaded_theme)
+        self.theme_load_tasks.append(task)
+        self.theme_load_pool.start(task)
+
+    def _store_preloaded_theme(self, result: ThemeLoadResult) -> None:
+        self._store_theme_cache(result)
+        self._forget_theme_task(result.cache_key)
+
+    def _store_theme_cache(self, result: ThemeLoadResult) -> None:
+        if result.image.isNull():
+            return
+        self.theme_cache[result.cache_key] = result
+        if result.cache_key in self.theme_cache_order:
+            self.theme_cache_order.remove(result.cache_key)
+        self.theme_cache_order.append(result.cache_key)
+        while len(self.theme_cache_order) > 5:
+            old_key = self.theme_cache_order.pop(0)
+            self.theme_cache.pop(old_key, None)
+
+    def _forget_theme_task(self, cache_key: tuple[str, int, int]) -> None:
+        self.theme_load_tasks = [task for task in self.theme_load_tasks if task.cache_key != cache_key]
+
+    def _theme_task_for(self, cache_key: tuple[str, int, int]) -> ThemeLoadTask | None:
+        return next((task for task in self.theme_load_tasks if task.cache_key == cache_key), None)
+
+    def _theme_target_size(self) -> QSize:
+        size = self.backdrop.size() if hasattr(self, "backdrop") else self.size()
+        return QSize(self._theme_size_bucket(size.width()), self._theme_size_bucket(size.height()))
+
+    @staticmethod
+    def _theme_size_bucket(value: int) -> int:
+        value = max(1, value)
+        return ((value + 127) // 128) * 128
+
+    def _theme_cache_key(self, theme_name: str) -> tuple[str, int, int]:
+        size = self._theme_target_size()
+        return (theme_name, size.width(), size.height())
+
+    def _resolve_theme_name(self, theme_name: str) -> str:
+        return theme_name if theme_name and self.backdrop.theme_path(theme_name) else self.backdrop.default_theme_name()
 
     def _advance_theme_spinner(self) -> None:
         if not self.theme_loading or not hasattr(self, "theme_button"):
@@ -1166,9 +1296,7 @@ class SoundMakerQtApp(QMainWindow):
         if not newest_theme:
             return
         self.backdrop.refresh_themes()
-        self.selected_theme = self.backdrop.set_theme(newest_theme)
-        self._apply_theme_palette()
-        self._save_preferences()
+        self._begin_theme_change(newest_theme)
 
     def remove_current_custom_theme(self) -> None:
         theme_name = self.backdrop.current_theme
@@ -1191,9 +1319,7 @@ class SoundMakerQtApp(QMainWindow):
             QMessageBox.warning(self, APP_TITLE, str(error))
             return
         self.backdrop.refresh_themes()
-        self.selected_theme = self.backdrop.set_theme("")
-        self._apply_theme_palette()
-        self._save_preferences()
+        self._begin_theme_change(self.backdrop.default_theme_name())
 
     def toggle_ambient_effects(self, enabled: bool) -> None:
         self.ambient_effects_enabled = enabled
@@ -1480,9 +1606,6 @@ class SoundMakerQtApp(QMainWindow):
         return max(5, random.randint(min_seconds, max_seconds))
 
     def _director_loop(self) -> None:
-        if datetime.now() < self._mode_switch_quiet_until:
-            self._update_timer_label()
-            return
         if self.is_running and datetime.now() >= self.next_event_time:
             self.run_current_mode()
             self.schedule_next_event()
@@ -1508,7 +1631,7 @@ class SoundMakerQtApp(QMainWindow):
         elif self.active_mode == MODE_CHAOS:
             self.run_chaos_event()
         elif self.active_mode == MODE_WINDOWS_ERROR:
-            self.audio.play_windows_error()
+            self.audio.play_system_error()
         elif self.active_mode == MODE_CHAT_NOTIFICATION:
             self.play_chat_notification()
 
@@ -1518,7 +1641,7 @@ class SoundMakerQtApp(QMainWindow):
         if MODE_FAKE_ERROR in enabled:
             actions.append(self.preview_message)
         if MODE_WINDOWS_ERROR in enabled:
-            actions.append(self.audio.play_windows_error)
+            actions.append(self.audio.play_system_error)
         if MODE_CHAT_NOTIFICATION in enabled:
             actions.append(self.play_chat_notification)
         if MODE_RANDOM_SOUND in enabled and self.library.sounds:
@@ -1563,10 +1686,13 @@ class SoundMakerQtApp(QMainWindow):
         return path if path.is_file() else None
 
     def preview_message(self) -> None:
-        if os.name == "nt":
-            ctypes.windll.user32.MessageBoxW(None, self.alert_text, self._t("system_error_title"), 0x00000010 | 0x00001000)
-        else:
-            QMessageBox.critical(self, self._t("system_error_title"), self.alert_text)
+        if IS_WINDOWS:
+            try:
+                ctypes.windll.user32.MessageBoxW(None, self.alert_text, self._t("system_error_title"), 0x00000010 | 0x00001000)
+                return
+            except (AttributeError, OSError):
+                pass
+        QMessageBox.critical(self, self._t("system_error_title"), self.alert_text)
 
     def preview_meme(self) -> None:
         image_path = self._selected_meme_image_path()
@@ -1647,10 +1773,7 @@ class SoundMakerQtApp(QMainWindow):
 
     def open_system_path(self, path: Path) -> None:
         try:
-            if os.name == "nt":
-                os.startfile(path)  # type: ignore[attr-defined]
-            else:
-                webbrowser.open(path.as_uri())
+            open_path(path)
         except Exception as exc:
             QMessageBox.warning(self, APP_TITLE, str(exc))
 
@@ -1660,8 +1783,8 @@ class SoundMakerQtApp(QMainWindow):
         self._save_preferences()
 
     def _apply_window_identity(self) -> None:
-        title = STEALTH_TITLE if self.camouflage_enabled else APP_TITLE
-        icon = self._windows_program_icon() if self.camouflage_enabled else self._prank_app_icon()
+        title = platform_stealth_title() if self.camouflage_enabled else APP_TITLE
+        icon = self._system_program_icon() if self.camouflage_enabled else self._prank_app_icon()
         self.setWindowTitle(title)
         self.setWindowIcon(icon)
         if self.tray_icon:
@@ -1669,7 +1792,7 @@ class SoundMakerQtApp(QMainWindow):
             self.tray_icon.setIcon(icon)
             self._refresh_tray_menu()
 
-    def _windows_program_icon(self) -> QIcon:
+    def _system_program_icon(self) -> QIcon:
         return self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
 
     def check_for_updates(self, manual: bool = True) -> None:
@@ -1678,24 +1801,85 @@ class SoundMakerQtApp(QMainWindow):
 
     def _handle_update_result(self, result: UpdateResult) -> None:
         if result.status == "available":
-            choice = QMessageBox.question(
-                self,
-                APP_TITLE,
+            should_open = self._show_update_dialog(
+                "available",
                 self._t("update_available", version=result.version),
-                QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Open,
+                primary_text=self._t("open_update"),
+                secondary_text=self._cancel_text(),
+                detail=self._version_detail(result.version),
             )
-            if choice == QMessageBox.StandardButton.Open:
+            if should_open:
                 webbrowser.open(result.download_url or result.release_url)
         elif result.status == "current":
             if self._update_check_is_manual:
-                QMessageBox.information(self, APP_TITLE, self._t("update_current", version=result.version or APP_VERSION))
+                self._show_update_dialog(
+                    "current",
+                    self._t("update_current", version=result.version or APP_VERSION),
+                    primary_text=self._close_text(),
+                    detail=self._version_detail(result.version or APP_VERSION),
+                )
         elif result.status == "no_release":
             if self._update_check_is_manual:
-                QMessageBox.information(self, APP_TITLE, self._t("update_missing_release", version=APP_VERSION))
+                self._show_update_dialog(
+                    "current",
+                    self._t("update_missing_release", version=APP_VERSION),
+                    primary_text=self._close_text(),
+                    detail=self._version_detail(APP_VERSION),
+                )
         else:
             if self._update_check_is_manual:
-                QMessageBox.warning(self, APP_TITLE, self._t("update_error", error=result.error))
+                self._show_update_dialog(
+                    "error",
+                    self._t("update_error", error=result.error),
+                    primary_text=self._close_text(),
+                )
+
+    def _show_update_dialog(
+        self,
+        status: str,
+        message: str,
+        primary_text: str,
+        secondary_text: str = "",
+        detail: str = "",
+    ) -> bool:
+        kicker, heading = self._update_dialog_copy(status)
+        dialog = UpdateDialog(
+            self,
+            APP_TITLE,
+            kicker,
+            heading,
+            message,
+            primary_text,
+            secondary_text=secondary_text,
+            detail=detail,
+        )
+        return dialog.exec() == QDialog.Accepted
+
+    def _update_dialog_copy(self, status: str) -> tuple[str, str]:
+        if self.language == "fr":
+            headings = {
+                "available": "Mise à jour disponible",
+                "current": "SoundMaker est à jour",
+                "error": "Vérification indisponible",
+            }
+            return "Mises à jour", headings.get(status, "Mises à jour")
+        headings = {
+            "available": "Update available",
+            "current": "SoundMaker is up to date",
+            "error": "Update check unavailable",
+        }
+        return "Updates", headings.get(status, "Updates")
+
+    def _version_detail(self, version: str) -> str:
+        if not version:
+            return ""
+        return f"Version {version}" if self.language == "fr" else f"Version {version}"
+
+    def _close_text(self) -> str:
+        return "Fermer" if self.language == "fr" else "Close"
+
+    def _cancel_text(self) -> str:
+        return "Annuler" if self.language == "fr" else "Cancel"
 
     def _build_tray_icon(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -1717,7 +1901,7 @@ class SoundMakerQtApp(QMainWindow):
         if not hasattr(self, "tray_menu"):
             return
         self.tray_menu.clear()
-        show_label = STEALTH_TITLE if self.camouflage_enabled else self._t("show_app")
+        show_label = platform_stealth_title() if self.camouflage_enabled else self._t("show_app")
         self.tray_menu.addAction(show_label, self._restore_window)
         self.tray_menu.addAction(self._t("quit"), self.quit_application)
 
@@ -1728,7 +1912,10 @@ class SoundMakerQtApp(QMainWindow):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API name
         if event.key() == Qt.Key_Escape:
-            self.hide()
+            if self.tray_icon and self.tray_icon.isVisible():
+                self.hide()
+            else:
+                self.showMinimized()
             return
         super().keyPressEvent(event)
 
@@ -1738,7 +1925,7 @@ class SoundMakerQtApp(QMainWindow):
 
     def quit_application(self) -> None:
         """Close the app completely; hiding/minimizing remains the stealth path."""
-        self._save_preferences()
+        self._save_preferences_now()
         self._set_visual_animations_running(False)
         if hasattr(self, "loop_timer"):
             self.loop_timer.stop()

@@ -74,13 +74,14 @@ def build_theme_qss(palette: ThemePalette) -> str:
     QGroupBox#section {{ margin-top: 11px; font-weight: 700; }}
     QGroupBox::title {{ subcontrol-origin: margin; left: 16px; padding: 0 8px; color: {hex_color(palette.text)}; background: {rgba(palette.base, 96)}; }}
     #timerCard {{ background: transparent; border: 0; }}
-    #previewCard, #imagePreview {{ background: {rgba(palette.base, 108)}; border: 2px solid {rgba(palette.text, 108)}; border-radius: 15px; color: {hex_color(palette.muted)}; }}
+    #previewCard {{ background: transparent; border: 0; }}
+    #imagePreview {{ background: transparent; border: 0; color: {hex_color(palette.muted)}; padding: 10px; }}
     #appTitle, #timerText {{ color: {hex_color(palette.text)}; font-weight: 800; }}
     #appTitle {{ font-size: 23px; }} #timerText {{ font-family: Consolas; font-size: 23px; }}
     #settingsTitle {{ font-size: 18px; font-weight: 800; }} #fieldTitle {{ color: {hex_color(palette.text)}; font-size: 14px; font-weight: 700; }}
     #muted, QLabel#muted {{ color: {hex_color(palette.muted)}; }} #tinyMuted {{ color: {rgba(palette.muted, 188)}; font-size: 12px; }}
     #sectionKicker {{ color: {hex_color(palette.accent)}; font-size: 11px; font-weight: 900; }}
-    #filePill {{ color: {hex_color(palette.text)}; background: {rgba(palette.surface_alt, 80)}; border: 2px solid {rgba(palette.text, 108)}; border-radius: 10px; padding: 7px 11px; }}
+    #filePill {{ color: {hex_color(palette.text)}; background: transparent; border: 0; padding: 7px 11px; }}
     #modeCard {{ background: transparent; border: 0; min-height: 68px; }}
     #modeCard:hover {{ background: transparent; }}
     QFrame#modeCard[active=\"true\"] {{ background: transparent; border: 0; }}
@@ -90,18 +91,15 @@ def build_theme_qss(palette: ThemePalette) -> str:
     QPushButton#secondaryButton {{ background: {rgba(palette.surface, 88)}; }} QPushButton#warningButton {{ background: {rgba(palette.accent, 116)}; border-color: {rgba(palette.text, 76)}; }}
     QPushButton#successButton, QPushButton#timerButton, QPushButton#helpButton, QPushButton#coffeeButton {{ background: transparent; border: 0; }}
     QPushButton#dangerButton {{ background: {rgba(palette.surface_alt, 102)}; }}
-    QPushButton#dockToggle {{ color: {hex_color(palette.text)}; background: {rgba(palette.base, 104)}; border: 2px solid {rgba(palette.text, 92)}; border-radius: 14px; padding: 8px 6px; font-size: 18px; font-weight: 800; text-align: right; }} QPushButton#dockToggle:hover {{ background: {rgba(palette.accent_alt, 122)}; border-color: {rgba(palette.accent, 148)}; }}
-    QComboBox, QLineEdit {{ background: {rgba(palette.base, 120)}; border: 2px solid {rgba(palette.text, 116)}; border-radius: 10px; padding: 8px 11px; selection-background-color: {hex_color(palette.accent_alt)}; }}
-    QComboBox:hover, QLineEdit:hover {{ border-color: {rgba(palette.accent, 150)}; }}
-    QComboBox:focus, QLineEdit:focus {{ border-color: {rgba(palette.accent, 188)}; background: {rgba(palette.surface, 134)}; }}
-    QComboBox#gardenSelect, QLineEdit#gardenInput {{ background: {rgba(palette.surface, 128)}; border-color: {rgba(palette.text, 122)}; border-radius: 11px; min-height: 24px; padding: 8px 12px; }}
-    QComboBox#gardenSelect::drop-down {{ width: 30px; border: 0; border-left: 2px solid {rgba(palette.text, 86)}; background: {rgba(palette.accent, 22)}; }}
+    QPushButton#dockToggle {{ color: {hex_color(palette.text)}; background: {rgba(palette.base, 104)}; border: 2px solid {rgba(palette.text, 92)}; border-radius: 14px; padding: 8px 6px; font-size: 18px; font-weight: 800; }} QPushButton#dockToggle:hover {{ background: {rgba(palette.accent_alt, 122)}; border-color: {rgba(palette.accent, 148)}; }}
+    QComboBox, QLineEdit {{ background: transparent; border: 0; border-radius: 0; padding: 8px 11px; selection-background-color: {hex_color(palette.accent_alt)}; }}
+    QComboBox#gardenSelect, QLineEdit#gardenInput {{ background: transparent; border: 0; border-radius: 0; min-height: 24px; padding: 8px 12px; }}
+    QComboBox#gardenSelect::drop-down {{ width: 30px; border: 0; background: transparent; }}
     QAbstractItemView, QMenu {{ background: {rgba(palette.base, 136)}; border: 2px solid {rgba(palette.text, 116)}; border-radius: 9px; color: {hex_color(palette.text)}; }}
     QAbstractItemView::item:hover, QMenu::item:selected {{ background: {rgba(palette.accent_alt, 124)}; }} QMenu::item {{ padding: 7px 24px 7px 10px; border-radius: 8px; }}
     #settingsTabScroll, #modesScroll {{ background: {rgba(palette.base, 14)}; }}
     QScrollBar:vertical {{ background: {rgba(palette.base, 62)}; width: 10px; margin: 8px 3px 8px 2px; border: 0; border-radius: 5px; }}
     QScrollBar::handle:vertical {{ background: {rgba(palette.accent_alt, 130)}; min-height: 42px; border: 2px solid {rgba(palette.text, 92)}; border-radius: 5px; }} QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-    QSlider {{ min-height: 24px; padding: 0 10px; }} QSlider::groove:horizontal {{ height: 6px; background: {rgba(palette.muted, 96)}; border: 2px solid {rgba(palette.text, 58)}; border-radius: 3px; }}
-    QSlider::sub-page:horizontal {{ background: {hex_color(palette.accent_alt)}; border-radius: 3px; }} QSlider::handle:horizontal {{ background: {hex_color(palette.accent)}; width: 19px; margin: -8px 0; border-radius: 10px; border: 2px solid {rgba(palette.text, 168)}; }}
+    QSlider {{ min-height: 26px; padding: 0; background: transparent; border: 0; }}
     QRadioButton, QCheckBox {{ color: {hex_color(palette.text)}; font-size: 14px; font-weight: 700; spacing: 8px; }}
     """

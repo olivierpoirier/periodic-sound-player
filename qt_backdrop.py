@@ -61,6 +61,12 @@ class PrankBackdrop(QWidget):
     def theme_path(self, theme_name: str) -> Path | None:
         return next((path for path in self.themes if path.name == theme_name), None)
 
+    def default_theme_name(self) -> str:
+        if not self.themes:
+            return ""
+        fallback = next((path for path in self.themes if path.name == "pexels-jordicosta-32167957.jpg"), self.themes[0])
+        return fallback.name
+
     @staticmethod
     def _hsv(hue: int, saturation: int, value: int) -> QColor:
         color = QColor()
@@ -76,7 +82,8 @@ class PrankBackdrop(QWidget):
             round(first.blue() + (second.blue() - first.blue()) * amount),
         )
 
-    def _palette_from_image(self, image: QImage) -> ThemePalette:
+    @classmethod
+    def palette_from_image(cls, image: QImage) -> ThemePalette:
         if image.isNull():
             image = QImage(1, 1, QImage.Format.Format_RGB32)
             image.fill(QColor.fromHsv(260, 110, 60))
@@ -117,24 +124,27 @@ class PrankBackdrop(QWidget):
         )
         _, secondary_hue, secondary_saturation, secondary_value = secondary
 
-        base = self._hsv(average_hue, max(14, average_saturation // 3), max(14, min(48, average_value // 5)))
-        surface = self._hsv(average_hue, max(12, average_saturation // 3), max(24, min(66, average_value // 4)))
-        surface_alt = self._hsv(secondary_hue, max(12, secondary_saturation // 3), max(30, min(82, secondary_value // 3)))
-        accent = self._hsv(accent_hue, max(78, accent_saturation), max(142, accent_value))
-        accent_alt = self._hsv(secondary_hue, max(68, secondary_saturation), max(136, secondary_value))
-        text = self._hsv(accent_hue, min(20, max(6, accent_saturation // 8)), 250)
-        muted = self._hsv(average_hue, min(34, max(8, average_saturation // 5)), 210)
+        base = cls._hsv(average_hue, max(14, average_saturation // 3), max(14, min(48, average_value // 5)))
+        surface = cls._hsv(average_hue, max(12, average_saturation // 3), max(24, min(66, average_value // 4)))
+        surface_alt = cls._hsv(secondary_hue, max(12, secondary_saturation // 3), max(30, min(82, secondary_value // 3)))
+        accent = cls._hsv(accent_hue, max(78, accent_saturation), max(142, accent_value))
+        accent_alt = cls._hsv(secondary_hue, max(68, secondary_saturation), max(136, secondary_value))
+        text = cls._hsv(accent_hue, min(20, max(6, accent_saturation // 8)), 250)
+        muted = cls._hsv(average_hue, min(34, max(8, average_saturation // 5)), 210)
         mode_colors = (
             accent,
-            self._blend(accent, accent_alt, 0.22),
-            self._blend(accent, text, 0.16),
+            cls._blend(accent, accent_alt, 0.22),
+            cls._blend(accent, text, 0.16),
             accent_alt,
-            self._blend(accent_alt, text, 0.18),
-            self._blend(accent, accent_alt, 0.58),
-            self._blend(accent_alt, text, 0.36),
+            cls._blend(accent_alt, text, 0.18),
+            cls._blend(accent, accent_alt, 0.58),
+            cls._blend(accent_alt, text, 0.36),
         )
         mode_accents = {mode.key: mode_colors[index] for index, mode in enumerate(MODES)}
         return ThemePalette(base, surface, surface_alt, accent, accent_alt, text, muted, mode_accents)
+
+    def _palette_from_image(self, image: QImage) -> ThemePalette:
+        return self.palette_from_image(image)
 
     def _discover_themes(self) -> list[Path]:
         return sorted(
@@ -148,8 +158,10 @@ class PrankBackdrop(QWidget):
     def set_theme(self, theme_name: str) -> str:
         if not self.themes:
             return ""
-        fallback = next((path for path in self.themes if path.name == "pexels-jordicosta-32167957.jpg"), self.themes[0])
-        theme = next((path for path in self.themes if path.name == theme_name), fallback)
+        fallback_name = self.default_theme_name()
+        theme = next((path for path in self.themes if path.name == theme_name), self.theme_path(fallback_name))
+        if not theme:
+            return ""
         pixmap = load_pixmap(theme)
         if pixmap.isNull():
             return self.current_theme
@@ -161,14 +173,14 @@ class PrankBackdrop(QWidget):
         self.update()
         return self.current_theme
 
-    def apply_theme_image(self, theme_name: str, image: QImage) -> str:
+    def apply_theme_image(self, theme_name: str, image: QImage, palette: ThemePalette | None = None) -> str:
         if image.isNull() or not self.theme_path(theme_name):
             return self.current_theme
         self.background = QPixmap.fromImage(image)
-        self.palette = self._palette_from_image(image)
+        self.palette = palette or self._palette_from_image(image)
         self.current_theme = theme_name
-        self._cached_background_size = QSize()
-        self._cached_background = QPixmap()
+        self._cached_background_size = QSize(self.size())
+        self._cached_background = self.background
         self.update()
         return self.current_theme
 

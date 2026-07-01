@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QPushButton, QVBoxLayout
 
 from app_config import (
     MODE_CHAOS,
@@ -29,7 +29,7 @@ from qt_components import (
     make_radio_group,
     make_slider,
 )
-from qt_widgets import GardenComboBox, PaintedButton, SafeSlider, SmoothCheckBox
+from qt_widgets import GardenComboBox, PaintedButton, SafeSlider, SmoothCheckBox, SmoothLineEdit
 
 
 def add_timer_controls(app: Any) -> None:
@@ -122,8 +122,8 @@ def add_meme_sound_settings(app: Any) -> None:
         app._add_meme_random_sound_controls()
     app._add_volume_controls()
     app.settings_layout = parent_layout
-    controls_shell.setVisible(app.meme_sound_enabled)
     app.settings_layout.addWidget(controls_shell)
+    controls_shell.setVisible(app.meme_sound_enabled)
 
 
 def add_sound_library_controls(app: Any) -> None:
@@ -208,12 +208,12 @@ def add_meme_controls(app: Any) -> None:
     grid.setHorizontalSpacing(10)
     grid.setVerticalSpacing(6)
 
-    app.meme_top_input = QLineEdit(app.meme_top_text)
+    app.meme_top_input = SmoothLineEdit(app.meme_top_text)
     app.meme_top_input.setObjectName("gardenInput")
     app.meme_top_input.setMaxLength(120)
     app.meme_top_input.textChanged.connect(app.on_meme_top_text_changed)
 
-    app.meme_bottom_input = QLineEdit(app.meme_bottom_text)
+    app.meme_bottom_input = SmoothLineEdit(app.meme_bottom_text)
     app.meme_bottom_input.setObjectName("gardenInput")
     app.meme_bottom_input.setMaxLength(120)
     app.meme_bottom_input.textChanged.connect(app.on_meme_bottom_text_changed)
@@ -289,7 +289,7 @@ def add_image_settings(app: Any) -> None:
 
 
 def add_alert_controls(app: Any) -> None:
-    alert_input = QLineEdit(app.alert_text)
+    alert_input = SmoothLineEdit(app.alert_text)
     alert_input.setObjectName("gardenInput")
     alert_input.setMaxLength(180)
     alert_input.textChanged.connect(app.on_alert_text_changed)
